@@ -1,0 +1,90 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = "notes-app"
+        CONTAINER_NAME = "notes-app-container"
+        PORT = "9092"
+    }
+
+    stages {
+
+        stage("Checkout") {
+            steps {
+                echo "📥 Cloning repository..."
+                git branch: 'master', url: 'https://github.com/AniketThings/nginx-frontend-app'
+            }
+        }
+
+        stage("Build Docker Image") {
+            steps {
+                sh """
+                echo "🚧 Building Docker image..."
+                docker build -t $IMAGE_NAME:latest .
+                """
+            }
+        }
+
+        stage("Push to Docker Hub") {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'Docker_Hub_id_Passwd',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh """
+                    echo "🔑 Logging into Docker Hub..."
+                    echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
+
+                    echo "🏷️ Tagging image..."
+                    docker tag $IMAGE_NAME:latest "\$DOCKER_USER/$IMAGE_NAME:latest"
+
+                    echo "📤 Pushing image to Docker Hub..."
+                    docker push "\$DOCKER_USER/$IMAGE_NAME:latest"
+
+                    docker logout
+                    """
+                }
+            }
+        }
+
+        stage("Stop Old Container") {
+            steps {
+                sh """
+                echo "🛑 Stopping old container (if any)..."
+                docker stop $CONTAINER_NAME || true
+                docker rm $CONTAINER_NAME || true
+                """
+            }
+        }
+
+        stage("Run New Container") {
+            steps {
+                sh """
+                echo "🚀 Running new container..."
+                docker run -d --name notes-app-container -p 9092:80 -v notes-data:/data notes.app:latest
+                """
+            }
+        }
+
+        stage("Verify Deployment") {
+            steps {
+                sh """
+                echo "🔍 Verifying application..."
+                sleep 5
+                curl -s http://3.109.55.33:$PORT | head -n 20
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Notes app deployed successfully!"
+        }
+        failure {
+            echo "❌ Deployment failed. Please check the logs."
+        }
+    }
+}
+
